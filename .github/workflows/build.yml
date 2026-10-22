@@ -22,7 +22,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.21"
+          go-version: "1.23"
 
       - name: Setup Android SDK
         run: |
@@ -31,7 +31,8 @@ jobs:
 
       - name: Build sing-box core (libbox.aar)
         run: |
-          git clone --depth 1 --branch v1.9.0 https://github.com/SagerNet/sing-box.git /tmp/sing-box
+          # ВЕРСИЯ ИЗМЕНЕНА: здесь ядро, где пофикшен вылет локали
+          git clone --depth 1 --branch v1.14.0-alpha.11 https://github.com/SagerNet/sing-box.git /tmp/sing-box
           cd /tmp/sing-box
           go install -v github.com/sagernet/gomobile/cmd/gomobile@v0.1.4
           go install -v github.com/sagernet/gomobile/cmd/gobind@v0.1.4
@@ -46,9 +47,6 @@ jobs:
 
       - name: Build APK
         working-directory: ${{ env.PROJ }}
-        env:
-          LANG: en_US.UTF-8
-          LC_ALL: en_US.UTF-8
         run: gradle assembleDebug --no-daemon
 
       - uses: actions/upload-artifact@v4
