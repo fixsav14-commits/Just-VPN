@@ -1,0 +1,82 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+
+env:
+  # Проверенная версия ядра. Не меняйте: у новых версий другой API, и приложение не соберётся.
+  SING_BOX_VERSION: v1.11.15
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack project zip
+        run: |
+          unzip -q "$(ls *.zip | head -1)"
+          PROJ=$(dirname "$(find . -name settings.gradle.kts | head -1)")
+          echo "PROJ=$GITHUB_WORKSPACE/${PROJ#./}" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Setup Android SDK
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26.2.11394342"
+
+      # ядро собирается ~6 минут, поэтому готовый результат запоминаем: повторные запуски идут быстрее
+      - name: Restore libbox.aar from cache
+        id: libbox-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: libbox-cache/libbox.aar
+          key: libbox-${{ env.SING_BOX_VERSION }}-v1
+
+      - name: Build sing-box core (libbox.aar)
+        if: steps.libbox-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$SING_BOX_VERSION" https://github.com/SagerNet/sing-box.git /tmp/sing-box
+          cd /tmp/sing-box
+          go install -v github.com/sagernet/gomobile/cmd/gomobile@v0.1.4
+          go install -v github.com/sagernet/gomobile/cmd/gobind@v0.1.4
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          go run ./cmd/internal/build_libbox -target android
+          AAR=$(find /tmp/sing-box -maxdepth 2 -name 'libbox*.aar' | head -1)
+          echo "Found: $AAR"
+          test -n "$AAR"
+          mkdir -p "$GITHUB_WORKSPACE/libbox-cache"
+          cp "$AAR" "$GITHUB_WORKSPACE/libbox-cache/libbox.aar"
+
+      - name: Save libbox.aar to cache
+        if: steps.libbox-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: libbox-cache/libbox.aar
+          key: libbox-${{ env.SING_BOX_VERSION }}-v1
+
+      - name: Put libbox.aar into the app
+        run: |
+          mkdir -p "$PROJ/app/libs"
+          cp libbox-cache/libbox.aar "$PROJ/app/libs/libbox.aar"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Build APK
+        working-directory: ${{ env.PROJ }}
+        run: gradle assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VpnBest-apk
+          path: ${{ env.PROJ }}/app/build/outputs/apk/debug/app-debug.apk
